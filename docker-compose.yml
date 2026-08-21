@@ -1,0 +1,84 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: pentest_db
+    environment:
+      POSTGRES_DB: pentest_db
+      POSTGRES_USER: pentest_user
+      POSTGRES_PASSWORD: pentest_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pentest_user -d pentest_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pentest_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pentest_backend
+    volumes:
+      - ./backend:/backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://pentest_user:pentest_password@db:5432/pentest_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=supersecretkeyforlocaldevelopmentonlychangeinprod
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pentest_worker
+    volumes:
+      - ./backend:/backend
+    command: celery -A app.tasks.celery_app.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://pentest_user:pentest_password@db:5432/pentest_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=supersecretkeyforlocaldevelopmentonlychangeinprod
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pentest_frontend
+    volumes:
+      - ./frontend:/frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,21 @@
+# Python
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+backend/venv/
+backend/test.db
+backend/test_scan.db
+backend/test_temp.db
+
+# Node / React
+**/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDEs & System
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
