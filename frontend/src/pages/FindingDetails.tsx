@@ -6,6 +6,7 @@ interface Finding {
   title: string;
   severity: string;
   confidence: string;
+  status: string;
   url: string;
   endpoint: string;
   description: string;
@@ -24,6 +25,10 @@ export default function FindingDetails() {
   const { id } = useParams<{ id: string }>();
   const [finding, setFinding] = useState<Finding | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statusVal, setStatusVal] = useState('New');
+  const [severityVal, setSeverityVal] = useState('Medium');
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
 
   useEffect(() => {
     const headers = {
@@ -34,10 +39,40 @@ export default function FindingDetails() {
         if (!res.ok) throw new Error('Failed to fetch');
         return res.json();
       })
-      .then((data) => setFinding(data))
+      .then((data: Finding) => {
+        setFinding(data);
+        setStatusVal(data.status || 'New');
+        setSeverityVal(data.severity || 'Medium');
+      })
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
   }, [id]);
+
+  const handleTriageSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setSaveMsg('');
+    fetch(`/api/v1/findings/${id}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: statusVal,
+        severity: severityVal,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Update failed');
+        setFinding(data);
+        setSaveMsg('Triage status saved!');
+        setTimeout(() => setSaveMsg(''), 3000);
+      })
+      .catch((err) => setSaveMsg(err.message))
+      .finally(() => setSaving(false));
+  };
 
   if (loading) {
     return <div className="text-center py-10">Decrypting finding details...</div>;
@@ -58,15 +93,20 @@ export default function FindingDetails() {
           <Link to="/" className="text-xs text-blue-400 hover:underline">&larr; Back to Dashboard</Link>
           <h1 className="text-2xl font-bold tracking-tight mt-1">{finding.title}</h1>
         </div>
-        <span
-          className={`px-3 py-1.5 rounded text-xs font-bold ${
-            finding.severity === 'Critical' || finding.severity === 'High'
-              ? 'bg-red-950 text-red-400 border border-red-800'
-              : 'bg-gray-800 text-gray-400 border border-gray-700'
-          }`}
-        >
-          {finding.severity} Severity
-        </span>
+        <div className="flex gap-2">
+          <span className="px-3 py-1.5 rounded text-xs font-bold bg-blue-950 text-blue-400 border border-blue-800">
+            {finding.status}
+          </span>
+          <span
+            className={`px-3 py-1.5 rounded text-xs font-bold ${
+              finding.severity === 'Critical' || finding.severity === 'High'
+                ? 'bg-red-950 text-red-400 border border-red-800'
+                : 'bg-gray-800 text-gray-400 border border-gray-700'
+            }`}
+          >
+            {finding.severity} Severity
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -117,8 +157,53 @@ export default function FindingDetails() {
           )}
         </div>
 
-        {/* Right Col: Metadata */}
+        {/* Right Col: Metadata & Triage Controls */}
         <div className="lg:col-span-1 space-y-6">
+          {/* Triage Controls Card */}
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
+            <h2 className="text-md font-bold border-b border-gray-700 pb-2 mb-4">Security Triage</h2>
+            <form onSubmit={handleTriageSave} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Lifecycle Status</label>
+                <select
+                  value={statusVal}
+                  onChange={(e) => setStatusVal(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white"
+                >
+                  <option value="New">New</option>
+                  <option value="Confirmed">Confirmed</option>
+                  <option value="False Positive">False Positive</option>
+                  <option value="Resolved">Resolved</option>
+                  <option value="Risk Accepted">Risk Accepted</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Adjusted Severity</label>
+                <select
+                  value={severityVal}
+                  onChange={(e) => setSeverityVal(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white"
+                >
+                  <option value="Critical">Critical</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                  <option value="Info">Info</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full bg-blue-600 hover:bg-blue-500 font-bold py-2 rounded text-xs transition"
+              >
+                {saving ? 'Updating...' : 'Save Triage Decisions'}
+              </button>
+              {saveMsg && <p className="text-xs text-center text-emerald-400 font-semibold">{saveMsg}</p>}
+            </form>
+          </div>
+
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 space-y-4">
             <h2 className="text-md font-bold border-b border-gray-700 pb-2">Classification</h2>
             

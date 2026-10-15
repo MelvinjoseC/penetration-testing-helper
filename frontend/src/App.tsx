@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
-import { Shield, LayoutDashboard, Target, ListCollapse, LogOut } from 'lucide-react';
+import { Shield, LayoutDashboard, Target, ListCollapse, FileText, LogOut } from 'lucide-react';
 
 import Dashboard from './pages/Dashboard';
 import Engagements from './pages/Engagements';
 import ScanDetails from './pages/ScanDetails';
 import FindingDetails from './pages/FindingDetails';
+import AuditLogs from './pages/AuditLogs';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
@@ -215,6 +216,13 @@ export default function App() {
                 <ListCollapse className="w-4 h-4" />
                 <span>Scan Pipeline</span>
               </Link>
+              <Link
+                to="/audit-logs"
+                className="flex items-center space-x-3 px-3 py-2 rounded text-sm font-medium hover:bg-gray-800 transition"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Audit Logs</span>
+              </Link>
             </nav>
           </div>
 
@@ -234,6 +242,7 @@ export default function App() {
             <Route path="/engagements" element={<Engagements />} />
             <Route path="/scans" element={<ScanDetails />} />
             <Route path="/findings/:id" element={<FindingDetails />} />
+            <Route path="/audit-logs" element={<AuditLogs />} />
           </Routes>
         </main>
       </div>

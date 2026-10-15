@@ -149,8 +149,8 @@ export default function Engagements() {
       });
   };
 
-  const handleDownloadReport = (engId: string) => {
-    fetch(`/api/v1/reports?engagement_id=${engId}`, {
+  const handleDownloadReport = (engId: string, format: 'html' | 'json' | 'markdown' = 'html') => {
+    fetch(`/api/v1/reports?engagement_id=${engId}&format=${format}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -158,10 +158,11 @@ export default function Engagements() {
     })
       .then((res) => res.blob())
       .then((blob) => {
+        const ext = format === 'json' ? 'json' : format === 'markdown' ? 'md' : 'html';
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `pentest-report-${engId}.html`;
+        a.download = `pentest-report-${engId}.${ext}`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -274,12 +275,29 @@ export default function Engagements() {
                 >
                   {activeEngagement.is_verified ? 'VERIFIED BOUNDARY' : 'UNVERIFIED BOUNDARY'}
                 </span>
-                <button
-                  onClick={() => handleDownloadReport(activeEngagement.id)}
-                  className="bg-gray-700 hover:bg-gray-600 font-bold py-1.5 px-3 rounded text-xs transition"
-                >
-                  Export Report
-                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => handleDownloadReport(activeEngagement.id, 'html')}
+                    className="bg-gray-700 hover:bg-gray-600 font-bold py-1 px-2.5 rounded text-xs transition"
+                    title="Export styled HTML report"
+                  >
+                    HTML
+                  </button>
+                  <button
+                    onClick={() => handleDownloadReport(activeEngagement.id, 'json')}
+                    className="bg-gray-700 hover:bg-gray-600 font-bold py-1 px-2.5 rounded text-xs transition"
+                    title="Export raw JSON findings data"
+                  >
+                    JSON
+                  </button>
+                  <button
+                    onClick={() => handleDownloadReport(activeEngagement.id, 'markdown')}
+                    className="bg-gray-700 hover:bg-gray-600 font-bold py-1 px-2.5 rounded text-xs transition"
+                    title="Export Markdown report"
+                  >
+                    MD
+                  </button>
+                </div>
               </div>
             </div>
 
