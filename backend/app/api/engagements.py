@@ -7,7 +7,7 @@ from app.auth.deps import get_current_user
 from app.models.user import User
 from app.models.engagement import Engagement, Scope, Asset
 from app.schemas.models import (
-    EngagementCreate, EngagementResponse,
+    EngagementCreate, EngagementUpdate, EngagementResponse,
     ScopeCreate, ScopeUpdate, ScopeResponse, VerificationRequest
 )
 from app.core.audit import log_event
@@ -89,6 +89,124 @@ def get_engagement(
             detail="Engagement not found."
         )
     return engagement
+
+@router.patch("/{id}", response_model=EngagementResponse)
+def update_engagement(
+    id: uuid.UUID,
+    *,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    engagement_in: EngagementUpdate,
+    request: Request
+) -> Any:
+    """
+    Update engagement details, scope parameters, or status (active/archived/completed).
+    """
+    engagement = db.query(Engagement).filter(
+        Engagement.id == id,
+        Engagement.organization_id == current_user.organization_id
+    ).first()
+    if not engagement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Engagement not found."
+        )
+
+    changes = {}
+    if engagement_in.name is not None and engagement_in.name != engagement.name:
+        changes["old_name"] = engagement.name
+        changes["new_name"] = engagement_in.name
+        engagement.name = engagement_in.name
+
+    if engagement_in.company is not None and engagement_in.company != engagement.company:
+        changes["old_company"] = engagement.company
+        changes["new_company"] = engagement_in.company
+        engagement.company = engagement_in.company
+
+    if engagement_in.description is not None:
+        engagement.description = engagement_in.description
+        changes["description_updated"] = True
+
+    if engagement_in.authorization_reference is not None and engagement_in.authorization_reference != engagement.authorization_reference:
+        changes["old_auth_ref"] = engagement.authorization_reference
+        changes["new_auth_ref"] = engagement_in.authorization_reference
+        engagement.authorization_reference = engagement_in.authorization_reference
+
+    if engagement_in.status is not None and engagement_in.status != engagement.status:
+        changes["old_status"] = engagement.status
+        changes["new_status"] = engagement_in.status
+        engagement.status = engagement_in.status
+
+    if engagement_in.start_date is not None:
+        engagement.start_date = engagement_in.start_date
+        changes["start_date_updated"] = True
+
+    if engagement_in.end_date is not None:
+        engagement.end_date = engagement_in.end_date
+        changes["end_date_updated"] = True
+
+    if changes:
+        db.add(engagement)
+        db.commit()
+        db.refresh(engagement)
+
+        ip_address = request.client.host if request.client else None
+        log_event(
+            db=db,
+            organization_id=current_user.organization_id,
+            user_id=current_user.id,
+            action="ENGAGEMENT_UPDATE",
+            target=str(engagement.id),
+            ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
+            details=changes
+        )
+
+    return engagement
+
+@router.delete("/{id}")
+def delete_engagement(
+    id: uuid.UUID,
+    *,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request
+) -> Any:
+    """
+    Delete an engagement and all its associated scoping rules, scans, and findings.
+    """
+    engagement = db.query(Engagement).filter(
+        Engagement.id == id,
+        Engagement.organization_id == current_user.organization_id
+    ).first()
+    if not engagement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Engagement not found."
+        )
+
+    details = {
+        "name": engagement.name,
+        "company": engagement.company,
+        "authorization_reference": engagement.authorization_reference
+    }
+
+    db.delete(engagement)
+    db.commit()
+
+    ip_address = request.client.host if request.client else None
+    log_event(
+        db=db,
+        organization_id=current_user.organization_id,
+        user_id=current_user.id,
+        action="ENGAGEMENT_DELETE",
+        target=str(id),
+        ip_address=ip_address,
+        user_agent=request.headers.get("user-agent"),
+        details=details
+    )
+
+    return {"status": "success", "message": "Engagement deleted successfully."}
 
 @router.post("/{id}/scope", response_model=ScopeResponse, status_code=status.HTTP_201_CREATED)
 def add_scope_rule(
