@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import re
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 class OrganizationBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -21,6 +22,17 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=128)
     organization_name: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long.")
+        if not re.search(r"\d", v):
+            raise ValueError("Password must contain at least one numerical digit.")
+        if not re.search(r"[A-Za-z]", v):
+            raise ValueError("Password must contain at least one alphabetical letter.")
+        return v
 
 class UserRegisterResponse(UserBase):
     id: uuid.UUID
