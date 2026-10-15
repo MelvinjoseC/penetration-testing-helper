@@ -6,6 +6,7 @@ from app.api.engagements import router as engagements_router
 from app.api.scans import router as scans_router
 from app.api.findings import router as findings_router
 from app.api.reports import router as reports_router
+from app.api.audit import router as audit_router
 
 from contextlib import asynccontextmanager
 
@@ -63,6 +64,7 @@ app.include_router(engagements_router, prefix=settings.API_V1_STR)
 app.include_router(scans_router, prefix=settings.API_V1_STR)
 app.include_router(findings_router, prefix=settings.API_V1_STR)
 app.include_router(reports_router, prefix=settings.API_V1_STR)
+app.include_router(audit_router, prefix=settings.API_V1_STR)
 
 @app.get("/health", tags=["Health"])
 def health_check():

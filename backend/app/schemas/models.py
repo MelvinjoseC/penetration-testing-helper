@@ -194,3 +194,17 @@ class VerificationRequest(BaseModel):
         if v_clean not in valid_methods:
             raise ValueError(f"Invalid verification method '{v}'. Allowed: {', '.join(sorted(valid_methods))}")
         return v_clean
+
+# --- Audit Schemas ---
+class AuditLogResponse(BaseModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: Optional[uuid.UUID] = None
+    action: str
+    target: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
