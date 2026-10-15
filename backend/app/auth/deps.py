@@ -68,3 +68,7 @@ class RoleChecker:
                 detail="The user does not have enough privileges",
             )
         return current_user
+
+require_admin = RoleChecker(["admin"])
+require_operator = RoleChecker(["admin", "tester"])
+

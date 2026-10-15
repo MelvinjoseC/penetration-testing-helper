@@ -3,7 +3,7 @@ from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.auth.deps import get_current_user
+from app.auth.deps import get_current_user, require_admin, require_operator
 from app.models.user import User
 from app.models.engagement import Engagement, Scope, Asset
 from app.schemas.models import (
@@ -21,10 +21,10 @@ router = APIRouter(prefix="/engagements", tags=["Engagements"])
 def create_engagement(
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_operator),
     engagement_in: EngagementCreate,
     request: Request
-) -> Any:
+):
     """
     Create a new security engagement under the current user's organization scope.
     """
@@ -95,7 +95,7 @@ def update_engagement(
     id: uuid.UUID,
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_operator),
     engagement_in: EngagementUpdate,
     request: Request
 ) -> Any:
@@ -169,7 +169,7 @@ def delete_engagement(
     id: uuid.UUID,
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     request: Request
 ) -> Any:
     """
@@ -213,7 +213,7 @@ def add_scope_rule(
     id: uuid.UUID,
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_operator),
     scope_in: ScopeCreate,
     request: Request
 ) -> Any:
@@ -285,7 +285,7 @@ def update_scope_rule(
     scope_id: uuid.UUID,
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_operator),
     scope_in: ScopeUpdate,
     request: Request
 ) -> Any:
@@ -353,7 +353,7 @@ def delete_scope_rule(
     scope_id: uuid.UUID,
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_operator),
     request: Request
 ) -> Any:
     """
@@ -407,7 +407,7 @@ def verify_engagement_target(
     id: uuid.UUID,
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_operator),
     domain: str,
     verify_in: VerificationRequest,
     request: Request
