@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import { Shield, LayoutDashboard, Target, ListCollapse, LogOut } from 'lucide-react';
 
-import Dashboard from './pages/Dashboard.tsx';
-import Engagements from './pages/Engagements.tsx';
-import ScanDetails from './pages/ScanDetails.tsx';
-import FindingDetails from './pages/FindingDetails.tsx';
+import Dashboard from './pages/Dashboard';
+import Engagements from './pages/Engagements';
+import ScanDetails from './pages/ScanDetails';
+import FindingDetails from './pages/FindingDetails';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
