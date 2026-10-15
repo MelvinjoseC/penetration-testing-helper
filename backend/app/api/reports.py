@@ -229,7 +229,7 @@ def generate_report(
 
     <div class="footer">
         <p>CONFIDENTIAL ASSESSMENT REPORT - FOR INTERNAL USE ONLY</p>
-        <p>Platform Orchestrator &bull; Generated at {datetime.datetime.utcnow().isoformat() if hasattr(datetime, "datetime") else ""}</p>
+        <p>Platform Orchestrator &bull; Generated at {datetime.datetime.now(datetime.timezone.utc).isoformat()}</p>
     </div>
 
 </body>

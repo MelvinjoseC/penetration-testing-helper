@@ -121,7 +121,7 @@ def run_scan(scan_id_str: str) -> str:
                 **asset.details,
                 "server_header": http_data["evidence"]["headers"].get("Server", "Unknown"),
                 "status_code": http_data["evidence"]["status_code"],
-                "last_seen": datetime.datetime.utcnow().isoformat() if hasattr(datetime, "datetime") else None
+                "last_seen": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             db.add(asset)
             db.commit()
