@@ -1,5 +1,6 @@
 import uuid
 import datetime
+import html
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
@@ -8,6 +9,9 @@ from app.auth.deps import get_current_user
 from app.models.user import User
 from app.models.engagement import Engagement
 from app.models.scan import Finding
+
+def esc(val: Any) -> str:
+    return html.escape(str(val)) if val is not None else ""
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -129,15 +133,15 @@ def generate_report(
 
     <div class="section" style="text-align: center; margin-bottom: 60px;">
         <h1 style="border: none; font-size: 32px;">Penetration Testing Assessment Report</h1>
-        <p style="font-size: 18px; color: #4a5568;">Engagement: {engagement.name}</p>
-        <p style="font-size: 14px; color: #718096;">Generated for: {engagement.company}</p>
-        <p style="font-size: 14px; color: #718096;">Authorization Reference: {engagement.authorization_reference}</p>
+        <p style="font-size: 18px; color: #4a5568;">Engagement: {esc(engagement.name)}</p>
+        <p style="font-size: 14px; color: #718096;">Generated for: {esc(engagement.company)}</p>
+        <p style="font-size: 14px; color: #718096;">Authorization Reference: {esc(engagement.authorization_reference)}</p>
     </div>
 
     <div class="section">
         <h2>1. Executive Summary</h2>
         <p>
-            An authorized security assessment was conducted against the target assets defined within the engagement scope for <strong>{engagement.company}</strong>.
+            An authorized security assessment was conducted against the target assets defined within the engagement scope for <strong>{esc(engagement.company)}</strong>.
             The primary goal of this assessment was to identify potential security exposures, configurations anomalies, and compliance risks using safe, non-destructive methodologies.
         </p>
         
@@ -183,8 +187,8 @@ def generate_report(
         classification = "Excluded" if scope.is_excluded else "Allowed"
         html_content += f"""
                 <tr>
-                    <td>{scope.type.capitalize()}</td>
-                    <td><code>{scope.pattern}</code></td>
+                    <td>{esc(scope.type.capitalize())}</td>
+                    <td><code>{esc(scope.pattern)}</code></td>
                     <td><strong>{classification}</strong></td>
                 </tr>
         """
@@ -205,22 +209,22 @@ def generate_report(
             html_content += f"""
             <div class="finding-card">
                 <div class="finding-title">
-                    {idx}. {finding.title} 
-                    <span class="badge badge-{finding.severity}">{finding.severity}</span>
+                    {idx}. {esc(finding.title)} 
+                    <span class="badge badge-{esc(finding.severity)}">{esc(finding.severity)}</span>
                 </div>
-                <p><strong>CWE:</strong> {finding.cwe or "N/A"} | <strong>OWASP Category:</strong> {finding.owasp_category or "N/A"}</p>
-                <p><strong>Description:</strong> {finding.description}</p>
+                <p><strong>CWE:</strong> {esc(finding.cwe or "N/A")} | <strong>OWASP Category:</strong> {esc(finding.owasp_category or "N/A")}</p>
+                <p><strong>Description:</strong> {esc(finding.description)}</p>
             """
             
             if finding.technical_details:
-                html_content += f"<p><strong>Technical Details:</strong> {finding.technical_details}</p>"
+                html_content += f"<p><strong>Technical Details:</strong> {esc(finding.technical_details)}</p>"
             if finding.remediation:
-                html_content += f"<p><strong>Remediation Guidance:</strong> {finding.remediation}</p>"
+                html_content += f"<p><strong>Remediation Guidance:</strong> {esc(finding.remediation)}</p>"
                 
             if finding.request:
-                html_content += f"<h4>Raw Request Evidence:</h4><pre>{finding.request}</pre>"
+                html_content += f"<h4>Raw Request Evidence:</h4><pre>{esc(finding.request)}</pre>"
             if finding.response:
-                html_content += f"<h4>Raw Response Evidence:</h4><pre>{finding.response}</pre>"
+                html_content += f"<h4>Raw Response Evidence:</h4><pre>{esc(finding.response)}</pre>"
                 
             html_content += "</div>"
 
