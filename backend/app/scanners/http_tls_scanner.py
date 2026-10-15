@@ -163,6 +163,12 @@ class HttpTlsScannerPlugin(ScannerPlugin):
                 missing_headers.append(("X-Frame-Options", "Low", "CWE-1027", "A05:2021-Security Misconfiguration", 3.1, "Add the X-Frame-Options header (DENY or SAMEORIGIN) to mitigate Clickjacking attacks."))
             if "x-content-type-options" not in headers:
                 missing_headers.append(("X-Content-Type-Options", "Low", "CWE-116", "A05:2021-Security Misconfiguration", 3.1, "Add the X-Content-Type-Options: nosniff header to prevent MIME-sniffing."))
+            if "referrer-policy" not in headers:
+                missing_headers.append(("Referrer-Policy", "Low", "CWE-116", "A05:2021-Security Misconfiguration", 3.1, "Add Referrer-Policy header (e.g. strict-origin-when-cross-origin) to prevent leakage of sensitive URL paths/tokens."))
+            if "permissions-policy" not in headers and "feature-policy" not in headers:
+                missing_headers.append(("Permissions-Policy", "Low", "CWE-16", "A05:2021-Security Misconfiguration", 2.5, "Configure Permissions-Policy header to restrict browser APIs like camera, microphone, and geolocation."))
+            if url.startswith("https://") and "strict-transport-security" not in headers:
+                missing_headers.append(("Strict-Transport-Security", "Medium", "CWE-319", "A02:2021-Cryptographic Failures", 5.3, "Implement Strict-Transport-Security header (max-age=31536000; includeSubDomains; preload) to prevent SSL stripping."))
                 
             for h_name, severity, cwe, owasp, cvss, rem in missing_headers:
                 findings.append(NormalizedFinding(
@@ -180,6 +186,42 @@ class HttpTlsScannerPlugin(ScannerPlugin):
                     cvss=cvss,
                     remediation=rem
                 ))
+
+            # CORS Misconfiguration Analysis
+            cors_origin = headers.get("access-control-allow-origin")
+            cors_creds = headers.get("access-control-allow-credentials", "").lower() == "true"
+            if cors_origin == "*" and cors_creds:
+                findings.append(NormalizedFinding(
+                    title="Critical CORS Configuration: Wildcard Origin with Credentials",
+                    severity="High",
+                    confidence="Confirmed",
+                    url=url,
+                    description="The server returns 'Access-Control-Allow-Origin: *' combined with 'Access-Control-Allow-Credentials: true'.",
+                    technical_details="Browsers generally reject this combination, but misconfigured proxies or custom user agents can leak sensitive session-authenticated data across origins.",
+                    evidence=evidence,
+                    request=f"GET {url}",
+                    response=f"Access-Control-Allow-Origin: *\nAccess-Control-Allow-Credentials: true",
+                    cwe="CWE-942",
+                    owasp_category="A01:2021-Broken Access Control",
+                    cvss=7.5,
+                    remediation="Explicitly specify trusted origins in Access-Control-Allow-Origin instead of wildcard when credentials are supported."
+                ))
+            elif cors_origin == "*":
+                findings.append(NormalizedFinding(
+                    title="Permissive CORS Policy: Wildcard Access-Control-Allow-Origin",
+                    severity="Info",
+                    confidence="Confirmed",
+                    url=url,
+                    description="The server returns 'Access-Control-Allow-Origin: *', allowing any arbitrary third-party site to read response data.",
+                    technical_details="Ensure that this endpoint does not expose confidential tenant or user data.",
+                    evidence=evidence,
+                    request=f"GET {url}",
+                    response=f"Access-Control-Allow-Origin: *",
+                    cwe="CWE-942",
+                    owasp_category="A01:2021-Broken Access Control",
+                    cvss=3.7,
+                    remediation="Restrict Access-Control-Allow-Origin to specific authorized origins if endpoint content is private or sensitive."
+                ))
                 
             # Cookie Security Analysis
             # Check Set-Cookie headers in the response
@@ -193,6 +235,8 @@ class HttpTlsScannerPlugin(ScannerPlugin):
                     issues.append("HttpOnly flag is missing (exposing the cookie to XSS read access)")
                 if "secure" not in cookie_lower:
                     issues.append("Secure flag is missing (transmitting the cookie over plaintext channel)")
+                if "samesite" not in cookie_lower:
+                    issues.append("SameSite attribute is missing (increasing CSRF vulnerability risk)")
                     
                 if issues:
                     findings.append(NormalizedFinding(
@@ -208,13 +252,13 @@ class HttpTlsScannerPlugin(ScannerPlugin):
                         cwe="CWE-614",
                         owasp_category="A05:2021-Security Misconfiguration",
                         cvss=3.5,
-                        remediation=f"Ensure that all sensitive session cookies are configured with 'HttpOnly' and 'Secure' attributes in production."
+                        remediation=f"Ensure that all sensitive session cookies are configured with 'HttpOnly', 'Secure', and 'SameSite=Lax/Strict' attributes in production."
                     ))
 
         # 2. Evaluate TLS details
         if tls_data and tls_data["status"] == "success":
             evidence = tls_data["evidence"]
-            if evidence["expired"]:
+            if evidence.get("expired"):
                 findings.append(NormalizedFinding(
                     title="Expired SSL/TLS Certificate",
                     severity="High",
@@ -228,5 +272,23 @@ class HttpTlsScannerPlugin(ScannerPlugin):
                     cvss=7.4,
                     remediation="Renew the SSL/TLS certificate with a valid certificate authority immediately."
                 ))
+
+            cipher_info = evidence.get("cipher")
+            if cipher_info and isinstance(cipher_info, (tuple, list)) and len(cipher_info) > 1:
+                cipher_name, proto_ver, bits = cipher_info[0], cipher_info[1], cipher_info[2]
+                if proto_ver in ["TLSv1", "TLSv1.0", "TLSv1.1", "SSLv2", "SSLv3"]:
+                    findings.append(NormalizedFinding(
+                        title=f"Deprecated TLS Protocol Version: {proto_ver}",
+                        severity="Medium",
+                        confidence="Confirmed",
+                        url=None,
+                        description=f"The server negotiates connection using deprecated protocol version '{proto_ver}'.",
+                        technical_details=f"Cipher: {cipher_name}, Bits: {bits}. Deprecated protocols are vulnerable to downgrade attacks.",
+                        evidence=evidence,
+                        cwe="CWE-326",
+                        owasp_category="A02:2021-Cryptographic Failures",
+                        cvss=5.9,
+                        remediation="Disable SSLv3, TLS 1.0, and TLS 1.1 in server TLS configuration. Enforce TLS 1.2 or TLS 1.3 only."
+                    ))
                 
         return findings
