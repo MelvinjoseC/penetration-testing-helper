@@ -10,6 +10,7 @@ from app.models.scan import Scan, Finding
 from app.models.engagement import Engagement, Scope, Asset
 from app.core.scope import ScopeService
 from app.scanners.http_tls_scanner import HttpTlsScannerPlugin
+from app.scanners.passive_dns_scanner import PassiveDnsScannerPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,11 @@ def generate_finding_fingerprint(engagement_id: uuid.UUID, title: str, url: str,
 @celery_app.task(name="app.tasks.scan_task.run_scan")
 def run_scan(scan_id_str: str) -> str:
     """
-    Executes an authorized security scan background task.
+    Executes an authorized security scan background task with profile routing.
     """
     scan_id = uuid.UUID(scan_id_str)
     db: Session = SessionLocal()
+    scan = None
     try:
         # 1. Fetch scan
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
@@ -98,7 +100,6 @@ def run_scan(scan_id_str: str) -> str:
         ).first()
         
         if not asset:
-            # Determine asset type
             asset_type = "web_app" if "://" in scan.target else "domain"
             asset = Asset(
                 engagement_id=engagement.id,
@@ -110,78 +111,88 @@ def run_scan(scan_id_str: str) -> str:
             db.commit()
             db.refresh(asset)
 
-        # 6. Execute safe scanning plugins via Asyncio run block
-        scanner = HttpTlsScannerPlugin()
-        raw_results = asyncio.run(scanner.execute(scan.target, {}))
-        
-        # Update asset details with server findings metadata
-        http_data = next((r for r in raw_results if r["check_type"] == "http_inspection"), None)
-        if http_data and http_data["status"] == "success":
-            asset.details = {
-                **asset.details,
-                "server_header": http_data["evidence"]["headers"].get("Server", "Unknown"),
-                "status_code": http_data["evidence"]["status_code"],
-                "last_seen": datetime.datetime.now(datetime.timezone.utc).isoformat()
-            }
-            db.add(asset)
-            db.commit()
+        # 6. Profile routing: select active scanner plugins
+        if scan.profile == "passive":
+            plugins = [PassiveDnsScannerPlugin()]
+        else:
+            # Safe profile runs both passive DNS/SPF/DMARC and safe HTTP/TLS header inspections
+            plugins = [HttpTlsScannerPlugin(), PassiveDnsScannerPlugin()]
 
-        # 7. Normalize, deduplicate, and store findings
-        normalized_findings = scanner.parse_results(raw_results)
-        
-        for norm in normalized_findings:
-            fingerprint = generate_finding_fingerprint(
-                engagement.id, 
-                norm.title, 
-                norm.url or "", 
-                norm.cwe or ""
-            )
-            
-            # Check for duplicates in this engagement
-            existing_finding = db.query(Finding).filter(
-                Finding.engagement_id == engagement.id,
-                Finding.fingerprint == fingerprint
-            ).first()
-            
-            if existing_finding:
-                # Merge evidence
-                evidence_list = existing_finding.evidence or {}
-                if isinstance(evidence_list, dict):
-                    evidence_list = [evidence_list]
-                elif not isinstance(evidence_list, list):
-                    evidence_list = []
-                    
-                evidence_list.append(norm.evidence)
-                existing_finding.evidence = {"scans": evidence_list}
-                existing_finding.request = norm.request or existing_finding.request
-                existing_finding.response = norm.response or existing_finding.response
-                db.add(existing_finding)
-            else:
-                # Create new Finding
-                new_finding = Finding(
-                    engagement_id=engagement.id,
-                    scan_id=scan.id,
-                    asset_id=asset.id,
-                    title=norm.title,
-                    severity=norm.severity,
-                    confidence=norm.confidence,
-                    url=norm.url,
-                    endpoint=norm.endpoint,
-                    description=norm.description,
-                    technical_details=norm.technical_details,
-                    evidence=norm.evidence,
-                    request=norm.request,
-                    response=norm.response,
-                    cwe=norm.cwe,
-                    owasp_category=norm.owasp_category,
-                    cvss=norm.cvss,
-                    remediation=norm.remediation,
-                    scanner=scanner.name,
-                    status="New",
-                    fingerprint=fingerprint
+        for scanner in plugins:
+            try:
+                raw_results = asyncio.run(scanner.execute(scan.target, {}))
+            except Exception as e:
+                logger.warning(f"Plugin {scanner.name} execution encountered error: {e}")
+                continue
+
+            # Update asset details if HTTP inspection returned metadata
+            http_data = next((r for r in raw_results if r.get("check_type") == "http_inspection"), None)
+            if http_data and http_data.get("status") == "success":
+                evidence = http_data.get("evidence", {})
+                asset.details = {
+                    **(asset.details or {}),
+                    "server_header": evidence.get("headers", {}).get("Server", "Unknown"),
+                    "status_code": evidence.get("status_code"),
+                    "last_seen": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                }
+                db.add(asset)
+                db.commit()
+
+            # 7. Normalize, deduplicate, and store findings
+            normalized_findings = scanner.parse_results(raw_results)
+            for norm in normalized_findings:
+                fingerprint = generate_finding_fingerprint(
+                    engagement.id, 
+                    norm.title, 
+                    norm.url or norm.endpoint or "", 
+                    norm.cwe or ""
                 )
-                db.add(new_finding)
                 
+                # Check for duplicates in this engagement
+                existing_finding = db.query(Finding).filter(
+                    Finding.engagement_id == engagement.id,
+                    Finding.fingerprint == fingerprint
+                ).first()
+                
+                if existing_finding:
+                    evidence_list = existing_finding.evidence or {}
+                    if isinstance(evidence_list, dict):
+                        evidence_list = [evidence_list]
+                    elif not isinstance(evidence_list, list):
+                        evidence_list = []
+                        
+                    evidence_list.append(norm.evidence)
+                    existing_finding.evidence = {"scans": evidence_list}
+                    existing_finding.request = norm.request or existing_finding.request
+                    existing_finding.response = norm.response or existing_finding.response
+                    db.add(existing_finding)
+                else:
+                    new_finding = Finding(
+                        engagement_id=engagement.id,
+                        scan_id=scan.id,
+                        asset_id=asset.id,
+                        title=norm.title,
+                        severity=norm.severity,
+                        confidence=norm.confidence,
+                        url=norm.url,
+                        endpoint=norm.endpoint,
+                        description=norm.description,
+                        technical_details=norm.technical_details,
+                        evidence=norm.evidence,
+                        request=norm.request,
+                        response=norm.response,
+                        cwe=norm.cwe,
+                        owasp_category=norm.owasp_category,
+                        cvss=norm.cvss,
+                        remediation=norm.remediation,
+                        scanner=scanner.name,
+                        status="New",
+                        fingerprint=fingerprint
+                    )
+                    db.add(new_finding)
+
+            db.commit()
+                    
         # 8. Mark scan completed
         scan.status = "completed"
         db.commit()
