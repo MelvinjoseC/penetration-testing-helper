@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.engagement import Engagement, Scope, Asset
 from app.schemas.models import (
     EngagementCreate, EngagementResponse,
-    ScopeCreate, ScopeResponse, VerificationRequest
+    ScopeCreate, ScopeUpdate, ScopeResponse, VerificationRequest
 )
 from app.core.audit import log_event
 from app.core.verification import (
@@ -160,6 +160,129 @@ def get_scope_rules(
             detail="Engagement not found."
         )
     return engagement.scopes
+
+@router.put("/{id}/scope/{scope_id}", response_model=ScopeResponse)
+def update_scope_rule(
+    id: uuid.UUID,
+    scope_id: uuid.UUID,
+    *,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope_in: ScopeUpdate,
+    request: Request
+) -> Any:
+    """
+    Update an existing scope rule for an engagement.
+    """
+    engagement = db.query(Engagement).filter(
+        Engagement.id == id,
+        Engagement.organization_id == current_user.organization_id
+    ).first()
+    if not engagement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Engagement not found."
+        )
+
+    scope = db.query(Scope).filter(
+        Scope.id == scope_id,
+        Scope.engagement_id == engagement.id
+    ).first()
+    if not scope:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scope rule not found."
+        )
+
+    changes = {}
+    if scope_in.type is not None and scope_in.type != scope.type:
+        changes["old_type"] = scope.type
+        changes["new_type"] = scope_in.type
+        scope.type = scope_in.type
+
+    if scope_in.pattern is not None and scope_in.pattern != scope.pattern:
+        changes["old_pattern"] = scope.pattern
+        changes["new_pattern"] = scope_in.pattern
+        scope.pattern = scope_in.pattern
+
+    if scope_in.is_excluded is not None and scope_in.is_excluded != scope.is_excluded:
+        changes["old_is_excluded"] = scope.is_excluded
+        changes["new_is_excluded"] = scope_in.is_excluded
+        scope.is_excluded = scope_in.is_excluded
+
+    if changes:
+        db.add(scope)
+        db.commit()
+        db.refresh(scope)
+
+        ip_address = request.client.host if request.client else None
+        log_event(
+            db=db,
+            organization_id=current_user.organization_id,
+            user_id=current_user.id,
+            action="SCOPE_UPDATE",
+            target=str(scope.id),
+            ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
+            details=changes
+        )
+
+    return scope
+
+@router.delete("/{id}/scope/{scope_id}")
+def delete_scope_rule(
+    id: uuid.UUID,
+    scope_id: uuid.UUID,
+    *,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request
+) -> Any:
+    """
+    Delete a scope rule from an engagement.
+    """
+    engagement = db.query(Engagement).filter(
+        Engagement.id == id,
+        Engagement.organization_id == current_user.organization_id
+    ).first()
+    if not engagement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Engagement not found."
+        )
+
+    scope = db.query(Scope).filter(
+        Scope.id == scope_id,
+        Scope.engagement_id == engagement.id
+    ).first()
+    if not scope:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scope rule not found."
+        )
+
+    rule_details = {
+        "engagement_id": str(engagement.id),
+        "type": scope.type,
+        "pattern": scope.pattern,
+        "is_excluded": scope.is_excluded
+    }
+    db.delete(scope)
+    db.commit()
+
+    ip_address = request.client.host if request.client else None
+    log_event(
+        db=db,
+        organization_id=current_user.organization_id,
+        user_id=current_user.id,
+        action="SCOPE_DELETE",
+        target=str(scope_id),
+        ip_address=ip_address,
+        user_agent=request.headers.get("user-agent"),
+        details=rule_details
+    )
+
+    return {"status": "success", "message": "Scope rule deleted successfully."}
 
 @router.post("/{id}/verify")
 def verify_engagement_target(
