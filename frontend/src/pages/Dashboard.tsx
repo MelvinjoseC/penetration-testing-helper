@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 
 interface Finding {
   id: string;
@@ -114,8 +115,8 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-3">
               {findings.slice(0, 5).map((finding) => (
-                <a
-                  href={`/findings/${finding.id}`}
+                <Link
+                  to={`/findings/${finding.id}`}
                   key={finding.id}
                   className="block p-3 bg-gray-900/60 hover:bg-gray-900 rounded border border-gray-800 transition"
                 >
@@ -134,7 +135,7 @@ export default function Dashboard() {
                       {finding.severity}
                     </span>
                   </div>
-                </a>
+                </Link>
               ))}
             </div>
           )}
