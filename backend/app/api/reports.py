@@ -1,8 +1,9 @@
 import uuid
 import datetime
 import html
+import json
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.auth.deps import get_current_user
@@ -20,11 +21,19 @@ def generate_report(
     *,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    engagement_id: uuid.UUID
+    engagement_id: uuid.UUID,
+    format: str = Query("html", description="Output format: html, json, or markdown")
 ) -> Any:
     """
-    Generate an HTML penetration-testing report containing Executive and Technical summaries.
+    Generate a penetration-testing assessment report in HTML, JSON, or Markdown format.
     """
+    format_clean = format.lower().strip()
+    if format_clean not in {"html", "json", "markdown"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported format '{format}'. Supported formats are: html, json, markdown."
+        )
+
     # 1. Verify engagement owner
     engagement = db.query(Engagement).filter(
         Engagement.id == engagement_id,
@@ -49,12 +58,151 @@ def generate_report(
         if f.severity in severity_counts:
             severity_counts[f.severity] += 1
 
-    # 3. Construct HTML
+    generated_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    # 3. Format: JSON Export
+    if format_clean == "json":
+        report_data = {
+            "report_title": f"Penetration Testing Assessment Report - {engagement.name}",
+            "generated_at": generated_timestamp,
+            "engagement": {
+                "id": str(engagement.id),
+                "name": engagement.name,
+                "company": engagement.company,
+                "authorization_reference": engagement.authorization_reference,
+                "status": engagement.status,
+                "is_verified": engagement.is_verified,
+                "start_date": engagement.start_date.isoformat() if engagement.start_date else None,
+                "end_date": engagement.end_date.isoformat() if engagement.end_date else None,
+            },
+            "summary": {
+                "total_findings": len(findings),
+                "severity_breakdown": severity_counts,
+            },
+            "scopes": [
+                {
+                    "id": str(s.id),
+                    "type": s.type,
+                    "pattern": s.pattern,
+                    "is_excluded": s.is_excluded
+                }
+                for s in engagement.scopes
+            ],
+            "findings": [
+                {
+                    "id": str(f.id),
+                    "title": f.title,
+                    "severity": f.severity,
+                    "confidence": f.confidence,
+                    "status": f.status,
+                    "cwe": f.cwe,
+                    "owasp_category": f.owasp_category,
+                    "cvss": f.cvss,
+                    "url": f.url,
+                    "description": f.description,
+                    "technical_details": f.technical_details,
+                    "remediation": f.remediation,
+                    "scanner": f.scanner,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                }
+                for f in sorted_findings
+            ]
+        }
+        return Response(
+            content=json.dumps(report_data, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="report-{engagement.id}.json"'}
+        )
+
+    # 4. Format: Markdown Export
+    if format_clean == "markdown":
+        md_lines = [
+            f"# Penetration Testing Assessment Report: {engagement.name}",
+            f"**Target Company:** {engagement.company}  ",
+            f"**Authorization Reference:** {engagement.authorization_reference}  ",
+            f"**Report Generated:** {generated_timestamp}  ",
+            "",
+            "## 1. Executive Summary",
+            "",
+            f"An authorized penetration-testing assessment was performed against configured assets for **{engagement.company}**.",
+            "",
+            "| Severity | Count |",
+            "| :--- | :--- |",
+            f"| Critical | {severity_counts['Critical']} |",
+            f"| High | {severity_counts['High']} |",
+            f"| Medium | {severity_counts['Medium']} |",
+            f"| Low | {severity_counts['Low']} |",
+            f"| Informational | {severity_counts['Info']} |",
+            f"| **Total** | **{len(findings)}** |",
+            "",
+            "## 2. Assessment Scope",
+            "",
+            "| Type | Pattern | Status |",
+            "| :--- | :--- | :--- |",
+        ]
+        for s in engagement.scopes:
+            status_text = "Excluded" if s.is_excluded else "Allowed"
+            md_lines.append(f"| {s.type} | `{s.pattern}` | {status_text} |")
+
+        md_lines.extend(["", "## 3. Detailed Technical Findings", ""])
+        if not sorted_findings:
+            md_lines.append("No security exposures identified.")
+        else:
+            for idx, f in enumerate(sorted_findings, 1):
+                md_lines.extend([
+                    f"### {idx}. {f.title} ({f.severity})",
+                    f"- **Status:** {f.status}",
+                    f"- **CWE:** {f.cwe or 'N/A'}",
+                    f"- **OWASP Category:** {f.owasp_category or 'N/A'}",
+                    f"- **CVSS:** {f.cvss if f.cvss is not None else 'N/A'}",
+                    f"- **Endpoint/URL:** {f.url or f.endpoint or 'N/A'}",
+                    "",
+                    f"**Description:**  ",
+                    f"{f.description}",
+                    "",
+                ])
+                if f.technical_details:
+                    md_lines.extend([
+                        f"**Technical Details:**  ",
+                        f"{f.technical_details}",
+                        "",
+                    ])
+                if f.remediation:
+                    md_lines.extend([
+                        f"**Remediation Guidance:**  ",
+                        f"{f.remediation}",
+                        "",
+                    ])
+                if f.request:
+                    md_lines.extend([
+                        "**Request:**",
+                        "```http",
+                        f.request,
+                        "```",
+                        "",
+                    ])
+                if f.response:
+                    md_lines.extend([
+                        "**Response:**",
+                        "```http",
+                        f.response,
+                        "```",
+                        "",
+                    ])
+
+        md_content = "\n".join(md_lines)
+        return Response(
+            content=md_content,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="report-{engagement.id}.md"'}
+        )
+
+    # 5. Format: HTML Export (Default)
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Penetration Testing Assessment Report - {engagement.name}</title>
+    <title>Penetration Testing Assessment Report - {esc(engagement.name)}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -233,10 +381,14 @@ def generate_report(
 
     <div class="footer">
         <p>CONFIDENTIAL ASSESSMENT REPORT - FOR INTERNAL USE ONLY</p>
-        <p>Platform Orchestrator &bull; Generated at {datetime.datetime.now(datetime.timezone.utc).isoformat()}</p>
+        <p>Platform Orchestrator &bull; Generated at {generated_timestamp}</p>
     </div>
 
 </body>
 </html>
 """
-    return Response(content=html_content, media_type="text/html")
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="report-{engagement.id}.html"'}
+    )
