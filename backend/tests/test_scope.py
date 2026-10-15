@@ -76,3 +76,21 @@ def test_scope_dns_rebinding_bypass():
 
     with patch("socket.getaddrinfo", side_effect=dns_resolve_local):
         assert ScopeService.is_allowed("evil-local.mycompany.com", scope_rules) is False
+
+def test_scope_blocks_cloud_metadata():
+    scope_rules = [
+        Scope(type="domain", pattern="*.mycompany.com", is_excluded=False)
+    ]
+    # Direct cloud metadata IP should always be blocked
+    assert ScopeService.is_allowed("169.254.169.254", scope_rules) is False
+    assert ScopeService.is_allowed("http://169.254.169.254/latest/meta-data/", scope_rules) is False
+
+    # Domain resolving to cloud metadata IP should be blocked
+    def dns_resolve_meta(host, port, *args, **kwargs):
+        if host == "metadata.mycompany.com":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80))]
+        return mock_getaddrinfo(host, port, *args, **kwargs)
+
+    with patch("socket.getaddrinfo", side_effect=dns_resolve_meta):
+        assert ScopeService.is_allowed("metadata.mycompany.com", scope_rules) is False
+

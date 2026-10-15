@@ -4,6 +4,40 @@ from urllib.parse import urlparse
 from typing import List, Optional, Tuple
 from app.models.engagement import Scope
 
+# Common cloud metadata and link-local address networks
+CLOUD_METADATA_NETWORKS = [
+    ipaddress.ip_network("169.254.169.254/32"),   # AWS/GCP/Azure/OpenStack metadata
+    ipaddress.ip_network("169.254.0.0/16"),       # IPv4 Link-local
+    ipaddress.ip_network("fe80::/10"),            # IPv6 Link-local
+]
+
+LOOPBACK_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),          # IPv4 Loopback
+    ipaddress.ip_network("::1/128"),              # IPv6 Loopback
+    ipaddress.ip_network("0.0.0.0/8"),            # Current network
+]
+
+def is_cloud_metadata(ip_str: str) -> bool:
+    """
+    Checks if an IP address points to dangerous cloud instance metadata services
+    or link-local addresses commonly abused in SSRF attacks.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return any(ip in net for net in CLOUD_METADATA_NETWORKS)
+    except ValueError:
+        return False
+
+def is_loopback(ip_str: str) -> bool:
+    """
+    Checks if an IP address is a loopback or unspecified local address.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return ip.is_loopback or any(ip in net for net in LOOPBACK_NETWORKS)
+    except ValueError:
+        return False
+
 def resolve_hostname(host: str) -> List[str]:
     """
     Resolves a hostname to a list of IP addresses (IPv4 and IPv6).
@@ -66,9 +100,8 @@ def parse_target(target: str) -> Tuple[str, Optional[int], Optional[str]]:
     
     # Try parsing host:port
     if ":" in target and not target.endswith("]"):  # Handle IPv6 brackets vs ports
-        # Check if it could be an IPv6 address without brackets
         parts = target.split(":")
-        if len(parts) == 2:
+        if len(parts) == 2 and parts[1].isdigit():
             return parts[0], int(parts[1]), None
             
     return target, None, None
@@ -134,11 +167,12 @@ def matches_rule(
 
 class ScopeService:
     @staticmethod
-    def is_allowed(target: str, scope_rules: List[Scope]) -> bool:
+    def is_allowed(target: str, scope_rules: List[Scope], allow_internal: bool = False) -> bool:
         """
-        Enforces target scope check.
+        Enforces target scope check with anti-SSRF protections.
         - Normalize and parse target.
         - Resolve target hostname to prevent DNS rebinding SSRF.
+        - Guard against cloud metadata endpoints (169.254.169.254, link-local).
         - Evaluate target host + resolved IPs against EXCLUDED rules first.
         - Evaluate target host + resolved IPs against INCLUDED rules.
         - Returns True if allowed, False otherwise.
@@ -156,7 +190,12 @@ class ScopeService:
             pass
 
         resolved_ips = [host] if is_raw_ip else resolve_hostname(host)
-        
+
+        # Guard: Strict SSRF Defense against Cloud Metadata and Link-Local
+        for ip in resolved_ips:
+            if is_cloud_metadata(ip):
+                return False
+
         # Step 1: Check Exclusions (Explicitly out-of-scope)
         for rule in scope_rules:
             if rule.is_excluded:
